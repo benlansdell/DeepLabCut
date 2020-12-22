@@ -44,6 +44,7 @@ def create_multianimaltraining_dataset(
     windows2linux=False,
     net_type=None,
     numdigits=2,
+    custom_cfg={}
 ):
     """
     Creates a training dataset for multi-animal datasets. Labels from all the extracted frames are merged into a single .h5 file.\n
@@ -72,6 +73,9 @@ def create_multianimaltraining_dataset(
         Type of networks. Currently resnet_50, resnet_101, and resnet_152 are supported (not the MobileNets!)
 
     numdigits: int, optional
+
+    custom_cfg: dict
+        Dictionary of key-values to change in pose_cfg.yaml
 
 
     Example
@@ -340,6 +344,11 @@ def create_multianimaltraining_dataset(
                     "display_iters": 500,
                 }
 
+                for key in custom_cfg:
+                    items2change[key] = custom_cfg[key]
+                print(custom_cfg)
+                print(items2change)
+
                 defaultconfigfile = os.path.join(dlcparent_path, "pose_cfg.yaml")
                 trainingdata = trainingsetmanipulation.MakeTrain_pose_yaml(
                     items2change, path_train_config, defaultconfigfile
@@ -360,7 +369,7 @@ def create_multianimaltraining_dataset(
                     "partaffinityfield_graph",
                     "num_limbs",
                     "dataset_type",
-                ]
+                ] + list(custom_cfg.keys())
 
                 trainingsetmanipulation.MakeTest_pose_yaml(
                     trainingdata,

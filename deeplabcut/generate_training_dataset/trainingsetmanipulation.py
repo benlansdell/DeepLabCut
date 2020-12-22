@@ -831,6 +831,7 @@ def create_training_dataset(
     testIndices=None,
     net_type=None,
     augmenter_type=None,
+    custom_cfg={},
 ):
     """
     Creates a training dataset. Labels from all the extracted frames are merged into a single .h5 file.\n
@@ -870,6 +871,9 @@ def create_training_dataset(
     augmenter_type: string
         Type of augmenter. Currently default, imgaug, tensorpack, and deterministic are supported.
 
+    custom_cfg: dict
+        Dictionary of key-values to change in pose_cfg.yaml
+
     Example
     --------
     >>> deeplabcut.create_training_dataset('/analysis/project/reaching-task/config.yaml',num_shuffles=1)
@@ -887,7 +891,7 @@ def create_training_dataset(
         )
 
         create_multianimaltraining_dataset(
-            config, num_shuffles, Shuffles, windows2linux, net_type
+            config, num_shuffles, Shuffles, windows2linux, net_type, custom_cfg = custom_cfg
         )
     else:
         scorer = cfg["scorer"]
@@ -1068,15 +1072,18 @@ def create_training_dataset(
                 # str(cfg['proj_path']+'/'+Path(modelfoldername) / 'test'  /  'pose_cfg.yaml')
                 items2change = {
                     "dataset": datafilename,
-                    "metadataset": metadatafilename,
                     "num_joints": len(bodyparts),
                     "all_joints": [[i] for i in range(len(bodyparts))],
                     "all_joints_names": [str(bpt) for bpt in bodyparts],
+                    "net_type": net_type,
                     "init_weights": model_path,
                     "project_path": str(cfg["project_path"]),
-                    "net_type": net_type,
                     "dataset_type": augmenter_type,
+                    "metadataset": metadatafilename,
                 }
+
+                for key in custom_cfg:
+                    items2change[key] = custom_cfg[key]
 
                 items2drop = {}
                 if augmenter_type == "scalecrop":
@@ -1098,7 +1105,7 @@ def create_training_dataset(
                     "global_scale",
                     "location_refinement",
                     "locref_stdev",
-                ]
+                ] + list(custom_cfg.keys())
                 MakeTest_pose_yaml(trainingdata, keys2save, path_test_config)
                 print(
                     "The training dataset is successfully created. Use the function 'train_network' to start training. Happy training!"
@@ -1130,7 +1137,7 @@ def create_training_model_comparison(
     net_types=["resnet_50"],
     augmenter_types=["default"],
     userfeedback=False,
-    windows2linux=False,
+    windows2linux=False
 ):
     """
     Creates a training dataset with different networks and augmentation types (dataset_loader) so that the shuffles
@@ -1224,3 +1231,113 @@ def create_training_model_comparison(
                     windows2linux=windows2linux,
                 )
                 logger.info(log_info)
+
+def create_training_custom_comparison(
+    config,
+    trainindex=0,
+    num_shuffles=1,
+    userfeedback=False,
+    windows2linux=False,
+    custom_cfgs=[]
+):
+    """
+    Creates a training dataset with different networks and augmentation types (dataset_loader) so that the shuffles
+    have same training and testing indices.
+
+    Therefore, this function is useful for benchmarking the performance of different network and augmentation types on the same training/testdata.\n
+
+    Parameter
+    ----------
+    config : string
+        Full path of the config.yaml file as a string.
+
+    trainindex: int, optional
+        Either (in case uniform = True) indexes which element of TrainingFraction in the config file should be used (note it is a list!).
+        Alternatively (uniform = False) indexes which folder is dropped, i.e. the first if trainindex=0, the second if trainindex =1, etc.
+
+    num_shuffles : int, optional
+        Number of shuffles of training dataset to create, i.e. [1,2,3] for num_shuffles=3. Default is set to 1.
+
+    userfeedback: bool, optional
+        If this is set to false, then all requested train/test splits are created (no matter if they already exist). If you
+        want to assure that previous splits etc. are not overwritten, then set this to True and you will be asked for each split.
+
+    windows2linux: bool.
+        The annotation files contain path formated according to your operating system. If you label on windows
+        but train & evaluate on a unix system (e.g. ubunt, colab, Mac) set this variable to True to convert the paths.
+
+    custom_cfgs: list
+        List of dictionaries, each dictionary containing parameters to change in pose_cfg.yaml. 
+
+    Example
+    --------
+    >>> deeplabcut.create_training_model_comparison('/analysis/project/reaching-task/config.yaml',num_shuffles=1,net_types=['resnet_50','resnet_152'],augmenter_types=['tensorpack','deterministic'])
+
+    Windows:
+    >>> deeplabcut.create_training_model_comparison('C:\\Users\\Ulf\\looming-task\\config.yaml',num_shuffles=1,net_types=['resnet_50','resnet_152'],augmenter_types=['tensorpack','deterministic'])
+
+    --------
+    """
+    # read cfg file
+    cfg = auxiliaryfunctions.read_config(config)
+    print("test")
+    # create log file
+    log_file_name = os.path.join(cfg["project_path"], "training_model_comparison.log")
+    logger = logging.getLogger("training_model_comparison")
+    if not logger.handlers:
+        logger = logging.getLogger("training_model_comparison")
+        hdlr = logging.FileHandler(log_file_name)
+        formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+        hdlr.setFormatter(formatter)
+        logger.addHandler(hdlr)
+        logger.setLevel(logging.INFO)
+    else:
+        pass
+
+    largestshuffleindex = get_largestshuffle_index(config)
+
+    for shuffle in range(num_shuffles):
+        trainIndices, testIndices = mergeandsplit(
+            config, trainindex=trainindex, uniform=True
+        )
+        for idx, params in enumerate(custom_cfgs):
+            if 'net_type' in params:
+                net = params['net_type']
+                del params['net_type']
+            else:
+                net = None
+            if 'default_augmenter' in params:
+                aug = params['default_augmenter']
+                del params['default_augmenter']
+            else:
+                aug = None
+            get_max_shuffle_idx = (
+                largestshuffleindex
+                + idx
+                + shuffle * len(custom_cfgs)
+            )
+            log_info = str(
+                "Shuffle index:"
+                + str(get_max_shuffle_idx)
+                + ", net_type:"
+                + ''
+                + ", augmenter_type:"
+                + ''
+                + ", other parameters:"
+                + str(params)
+                + ", trainsetindex:"
+                + str(trainindex)
+            )
+            print(params)
+            create_training_dataset(
+                config,
+                Shuffles=[get_max_shuffle_idx],
+                net_type=net,
+                trainIndices=[trainIndices],
+                testIndices=[testIndices],
+                augmenter_type=aug,
+                userfeedback=userfeedback,
+                windows2linux=windows2linux,
+                custom_cfg=params,
+            )
+            logger.info(log_info)

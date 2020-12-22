@@ -76,6 +76,7 @@ from deeplabcut.generate_training_dataset import (
 )
 from deeplabcut.generate_training_dataset import (
     create_training_model_comparison,
+    create_training_custom_comparison,
     cropimagesandlabels,
 )
 from deeplabcut.generate_training_dataset import create_multianimaltraining_dataset
