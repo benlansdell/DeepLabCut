@@ -346,24 +346,35 @@ def evaluate_multianimal_full(
 
                         sess.close()  # closes the current tf session
 
+                        snap_file_end = "_snapshot_" + str(Snapshots[snapindex]) + ".csv"
+
                         # Compute all distance statistics
                         df_dist = pd.DataFrame(dist, index=df.index)
-                        write_path = os.path.join(evaluationfolder, "dist.csv")
+                        write_path = os.path.join(evaluationfolder, "dist" + snap_file_end)
                         df_dist.to_csv(write_path)
+
+                        df_dist.to_csv(write_path.replace("dist" + snap_file_end, "dist.csv"))
 
                         stats_per_ind = _compute_stats(df_dist.groupby("individuals"))
                         stats_per_ind.to_csv(
-                            write_path.replace("dist.csv", "dist_stats_ind.csv")
+                            write_path.replace("dist" + snap_file_end, "dist_stats_ind" + snap_file_end)
+                        )
+                        stats_per_ind.to_csv(
+                            write_path.replace("dist" + snap_file_end, "dist_stats_ind.csv")
                         )
                         stats_per_bpt = _compute_stats(df_dist.groupby("bodyparts"))
                         stats_per_bpt.to_csv(
-                            write_path.replace("dist.csv", "dist_stats_bpt.csv")
+                            write_path.replace("dist" + snap_file_end, "dist_stats_bpt" + snap_file_end)
+                        )
+                        stats_per_bpt.to_csv(
+                            write_path.replace("dist" + snap_file_end, "dist_stats_bpt.csv")
                         )
 
                         # For OKS/PCK, compute the standard deviation error across all frames
                         sd = df_dist.groupby("bodyparts").mean().std(axis=1)
                         sd["distnorm"] = np.sqrt(np.nanmax(distnorm))
-                        sd.to_csv(write_path.replace("dist.csv", "sd.csv"))
+                        sd.to_csv(write_path.replace("dist" + snap_file_end, "sd" + snap_file_end))
+                        sd.to_csv(write_path.replace("dist" + snap_file_end, "sd.csv"))
 
                         if show_errors:
                             print("##########################################&1")
@@ -605,7 +616,7 @@ def evaluate_multianimal_crossvalidate(
             auxfun_multianimal.check_inferencecfg_sanity(cfg, inferencecfg)
 
         # Pick distance threshold for (r)PCK from the statistics computed during evaluation
-        stats_file = os.path.join(evaluationfolder, "sd.csv")
+        stats_file = os.path.join(evaluationfolder, "sd" + snap_file_end)
         if os.path.isfile(stats_file):
             stats = pd.read_csv(stats_file, header=None, index_col=0)
             inferencecfg.distnormalization = np.round(

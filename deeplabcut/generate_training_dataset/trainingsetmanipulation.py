@@ -1280,7 +1280,7 @@ def create_training_custom_comparison(
     """
     # read cfg file
     cfg = auxiliaryfunctions.read_config(config)
-    print("test")
+    print("test", windows2linux)
     # create log file
     log_file_name = os.path.join(cfg["project_path"], "training_model_comparison.log")
     logger = logging.getLogger("training_model_comparison")
@@ -1298,7 +1298,7 @@ def create_training_custom_comparison(
 
     for shuffle in range(num_shuffles):
         trainIndices, testIndices = mergeandsplit(
-            config, trainindex=trainindex, uniform=True
+            config, trainindex=trainindex, uniform=True, windows2linux = True
         )
         for idx, params in enumerate(custom_cfgs):
             if 'net_type' in params:
@@ -1329,6 +1329,7 @@ def create_training_custom_comparison(
                 + str(trainindex)
             )
             print(params)
+            
             create_training_dataset(
                 config,
                 Shuffles=[get_max_shuffle_idx],
