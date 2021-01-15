@@ -381,6 +381,7 @@ def GetPoseF(cfg, dlc_cfg, sess, inputs, outputs, cap, nframes, batchsize):
     pbar = tqdm(total=nframes)
     counter = 0
     step = max(10, int(nframes / 100))
+    inds = []
     while cap.isOpened():
         if counter % step == 0:
             pbar.update(step)
@@ -393,26 +394,21 @@ def GetPoseF(cfg, dlc_cfg, sess, inputs, outputs, cap, nframes, batchsize):
                 )
             else:
                 frames[batch_ind] = img_as_ubyte(frame)
-
+            inds.append(counter)
             if batch_ind == batchsize - 1:
                 pose = predict.getposeNP(frames, dlc_cfg, sess, inputs, outputs)
-                PredictedData[
-                    batch_num * batchsize : (batch_num + 1) * batchsize, :
-                ] = pose
+                PredictedData[inds] = pose
                 batch_ind = 0
+                inds.clear()
                 batch_num += 1
             else:
                 batch_ind += 1
-        else:
-            nframes = counter
-            print("Detected frames: ", nframes)
+        elif counter >= nframes:
             if batch_ind > 0:
                 pose = predict.getposeNP(
                     frames, dlc_cfg, sess, inputs, outputs
                 )  # process the whole batch (some frames might be from previous batch!)
-                PredictedData[
-                    batch_num * batchsize : batch_num * batchsize + batch_ind, :
-                ] = pose[:batch_ind, :]
+                PredictedData[inds[:batch_ind]] = pose[:batch_ind]
             break
         counter += 1
 
@@ -450,8 +446,7 @@ def GetPoseS(cfg, dlc_cfg, sess, inputs, outputs, cap, nframes):
             ] = (
                 pose.flatten()
             )  # NOTE: thereby cfg['all_joints_names'] should be same order as bodyparts!
-        else:
-            nframes = counter
+        elif counter >= nframes:
             break
         counter += 1
 
@@ -496,8 +491,7 @@ def GetPoseS_GTF(cfg, dlc_cfg, sess, inputs, outputs, cap, nframes):
             ] = (
                 pose.flatten()
             )  # NOTE: thereby cfg['all_joints_names'] should be same order as bodyparts!
-        else:
-            nframes = counter
+        elif counter >= nframes:
             break
         counter += 1
 
@@ -523,6 +517,7 @@ def GetPoseF_GTF(cfg, dlc_cfg, sess, inputs, outputs, cap, nframes, batchsize):
     pbar = tqdm(total=nframes)
     counter = 0
     step = max(10, int(nframes / 100))
+    inds = []
     while cap.isOpened():
         if counter % step == 0:
             pbar.update(step)
@@ -535,7 +530,7 @@ def GetPoseF_GTF(cfg, dlc_cfg, sess, inputs, outputs, cap, nframes, batchsize):
                 )
             else:
                 frames[batch_ind] = img_as_ubyte(frame)
-
+            inds.append(counter)
             if batch_ind == batchsize - 1:
                 # pose = predict.getposeNP(frames,dlc_cfg, sess, inputs, outputs)
                 pose = sess.run(pose_tensor, feed_dict={inputs: frames})
@@ -545,26 +540,19 @@ def GetPoseF_GTF(cfg, dlc_cfg, sess, inputs, outputs, cap, nframes, batchsize):
                 pose = np.reshape(
                     pose, (batchsize, -1)
                 )  # bring into batchsize times x,y,conf etc.
-                PredictedData[
-                    batch_num * batchsize : (batch_num + 1) * batchsize, :
-                ] = pose
-
+                PredictedData[inds] = pose
                 batch_ind = 0
+                inds.clear()
                 batch_num += 1
             else:
                 batch_ind += 1
-        else:
-            nframes = counter
-            print("Detected frames: ", nframes)
+        elif counter >= nframes:
             if batch_ind > 0:
                 # pose = predict.getposeNP(frames, dlc_cfg, sess, inputs, outputs) #process the whole batch (some frames might be from previous batch!)
                 pose = sess.run(pose_tensor, feed_dict={inputs: frames})
                 pose[:, [0, 1, 2]] = pose[:, [1, 0, 2]]
                 pose = np.reshape(pose, (batchsize, -1))
-                PredictedData[
-                    batch_num * batchsize : batch_num * batchsize + batch_ind, :
-                ] = pose[:batch_ind, :]
-
+                PredictedData[inds[:batch_ind]] = pose[:batch_ind]
             break
         counter += 1
 
@@ -643,8 +631,7 @@ def GetPoseDynamic(
                 detected = False
 
             PredictedData[counter, :] = pose
-        else:
-            nframes = counter
+        elif counter >= nframes:
             break
         counter += 1
 
