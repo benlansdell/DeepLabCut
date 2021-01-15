@@ -2,7 +2,6 @@
 DeepLabCut2.0 Toolbox (deeplabcut.org)
 © A. & M. Mathis Labs
 https://github.com/AlexEMG/DeepLabCut
-
 Please see AUTHORS for contributors.
 https://github.com/AlexEMG/DeepLabCut/blob/master/AUTHORS
 Licensed under GNU Lesser General Public License v3.0
@@ -403,8 +402,6 @@ def evaluate_multianimal_full(
 
                         sess.close()  # closes the current tf session
 
-                        snap_file_end = "_snapshot_" + str(Snapshots[snapindex]) + ".csv"
-
                         # Compute all distance statistics
                         df_dist = pd.DataFrame(dist, columns=df.index)
                         df_conf = pd.DataFrame(conf, columns=df.index)
@@ -449,8 +446,7 @@ def evaluate_multianimal_full(
                         # For OKS/PCK, compute the standard deviation error across all frames
                         sd = df_dist.groupby("bodyparts", axis=1).mean().std(axis=0)
                         sd["distnorm"] = np.sqrt(np.nanmax(distnorm))
-                        sd.to_csv(write_path.replace("dist" + snap_file_end, "sd" + snap_file_end))
-                        sd.to_csv(write_path.replace("dist" + snap_file_end, "sd.csv"))
+                        sd.to_csv(write_path.replace("dist.csv", "sd.csv"))
 
                         if show_errors:
                             string = "Results for {} training iterations: {}, shuffle {}:\n" \
@@ -521,74 +517,53 @@ def evaluate_multianimal_crossvalidate(
 ):
     """
     Cross-validate inference parameters on evaluation data; optimal parameters will be stored in "inference_cfg.yaml".
-
     They will then be then used for inference (for analysis of videos). Performs Bayesian Optimization with https://github.com/fmfn/BayesianOptimization
-
     This is a crucial step. The most important variable (in inferencecfg) to cross-validate is minimalnumberofconnections.
     Pass a reasonable range to optimize (e.g. if you have 5 edges from 1 to 5. If you have 4 bpts and 11 connections from 3 to 9).
-
     config: string
         Full path of the config.yaml file as a string.
-
     shuffle: int, optional
         An integer specifying the shuffle index of the training dataset used for training the network. The default is 1.
-
     trainingsetindex: int, optional
         Integer specifying which TrainingsetFraction to use. By default the first (note that TrainingFraction is a list in config.yaml).
-
     pbounds: dictionary of variables with ranges to crossvalidate.
         By default: pbounds = {
                         'pafthreshold': (0.05, 0.7),
                         'detectionthresholdsquare': (0, 0.9),
                         'minimalnumberofconnections': (1, # connections in your skeleton),
                     }
-
     inferencecfg: dict, OPTIONAL
         For the variables that are *not* crossvalidated the parameters from inference_cfg.yaml are used, or
         you can overwrite them by passing a dictinary with your preferred parameters.
-
     edgewisecondition: bool, default True
         Estimates Euclidean distances for each skeleton edge and uses those distance for excluding possible connections.
         If false, uses only one distance for all bodyparts (which is obviously suboptimal).
-
     target: string, default='rpck_train'
         What metric to optimize. Options are pck/rpck/rmse on train/test set.
-
     init_points: int, optional (default=10)
         Number of random initial explorations. Probing random regions helps diversify the exploration space.
         Parameter from BayesianOptimization.
-
     n_iter: int, optional (default=20)
         Number of iterations of Bayesian optimization to perform.
         The larger it is, the higher the likelihood of finding a good extremum.
         Parameter from BayesianOptimization.
-
     log_file: str, optional (default=None)
         Path to a JSON file containing the progress of a previous Bayesian optimization run.
         Note that previously probed points will not be evaluated again.
-
     dcorr: float,
         Distance thereshold for percent correct keypoints / relative percent correct keypoints (see paper).
-
     leastbpts: integer (should be a small number)
         If an animals has less or equal as many body parts in an image it will not be used
         for cross validation. Imagine e.g. if only a single bodypart is present, then
         if animals need a certain minimal number of bodyparts for assembly (minimalnumberofconnections),
         this might not be predictable.
-
     printingintermediatevalues: bool, default True
         If intermediate metrics RMSE/hits/.. per sample should be printed.
-
-
     Examples
     --------
-
     first run evalute:
-
     deeplabcut.evaluate_network(path_config_file,Shuffles=[shuffle],plotting=True)
-
     Then e.g. for finding inference parameters to minimize rmse on test set:
-
     deeplabcut.evaluate_multianimal_crossvalidate(path_config_file,Shuffles=[shuffle],target='rmse_test')
     """
     from deeplabcut.pose_estimation_tensorflow.lib import crossvalutils
@@ -696,7 +671,7 @@ def evaluate_multianimal_crossvalidate(
             auxfun_multianimal.check_inferencecfg_sanity(cfg, inferencecfg)
 
         # Pick distance threshold for (r)PCK from the statistics computed during evaluation
-        stats_file = os.path.join(evaluationfolder, "sd" + snap_file_end)
+        stats_file = os.path.join(evaluationfolder, "sd.csv")
         if os.path.isfile(stats_file):
             stats = pd.read_csv(stats_file, header=None, index_col=0)
             inferencecfg.distnormalization = np.round(
