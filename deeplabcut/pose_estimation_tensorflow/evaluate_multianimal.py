@@ -444,7 +444,7 @@ def evaluate_multianimal_full(
                         final_result.append(results)
 
                         # For OKS/PCK, compute the standard deviation error across all frames
-                        sd = df_dist.groupby("bodyparts", axis=1).mean().std(axis=0)
+                        sd = df_dist.groupby(level="bodyparts", axis=1).mean().std(axis=0)
                         sd["distnorm"] = np.sqrt(np.nanmax(distnorm))
                         sd.to_csv(write_path.replace("dist.csv", "sd.csv"))
 
@@ -457,9 +457,9 @@ def evaluate_multianimal_full(
 
                             print("##########################################")
                             print("Average Euclidean distance to GT per individual (in pixels)")
-                            print(error_masked.groupby('individuals', axis=1).mean().mean().to_string())
+                            print(error_masked.groupby(level='individuals', axis=1).mean().mean().to_string())
                             print("Average Euclidean distance to GT per bodypart (in pixels)")
-                            print(error_masked.groupby('bodyparts', axis=1).mean().mean().to_string())
+                            print(error_masked.groupby(level='bodyparts', axis=1).mean().mean().to_string())
 
                         PredicteData["metadata"] = {
                             "nms radius": dlc_cfg.nmsradius,
