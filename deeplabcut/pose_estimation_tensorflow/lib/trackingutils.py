@@ -298,7 +298,7 @@ class SORT:
 
         # mat = self.calc_pairwise_oks(poses, poses_ref)
         mat = self.calc_pairwise_hausdorff_dist(poses, poses_ref)
-        row_indices, col_indices = linear_sum_assignment(mat, maximize=False)
+        row_indices, col_indices = linear_sum_assignment(mat)#, maximize=False)
 
         unmatched_poses = [p for p, _ in enumerate(poses) if p not in row_indices]
         unmatched_trackers = [

@@ -1,0 +1,12 @@
+name: dlc-ubuntu-GPU
+channels:
+  - anaconda-fusion
+  - defaults
+dependencies:
+  - pip
+  - python=3.6.8
+  - pip:
+    - deeplabcut
+    - matplotlib==3.0.3
+    - tables==3.4.4
+    - tensorflow-gpu==1.13.1
