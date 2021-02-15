@@ -17,16 +17,18 @@
 # update:  conda env update -f DLC-GPU.yaml
 name: DLC
 channels:
-  - anaconda-fusion
+  - conda-forge
   - defaults
 dependencies:
   - python=3.6
   - pip
   - tensorflow-gpu==1.13.1
   - cudnn
-  - matplotlib==3.0.3
-  - cudatoolkit==9.0
   - jupyter
   - wxpython==4.0.3
   - nb_conda
   - Shapely
+  - cudatoolkit=9.0
+  - cudnn
+  - pip:
+    - matplotlib==3.0.3

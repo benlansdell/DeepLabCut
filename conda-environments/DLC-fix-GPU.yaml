@@ -1,12 +1,17 @@
-name: dlc-ubuntu-GPU
+name: DLC
 channels:
   - anaconda-fusion
   - defaults
+  - conda-forge
 dependencies:
   - pip
-  - python=3.6.8
+  - python=3.6
+  - cudatoolkit=10.0
+  - cudnn
+  - ipython
+  - wxpython=4.0.4
   - pip:
-    - deeplabcut
     - matplotlib==3.0.3
     - tables==3.4.4
     - tensorflow-gpu==1.13.1
+    - opencv-python==3.4.5.2
