@@ -1,19 +1,19 @@
 """
 DeepLabCut2.0 Toolbox (deeplabcut.org)
 © A. & M. Mathis Labs
-https://github.com/AlexEMG/DeepLabCut
+https://github.com/DeepLabCut/DeepLabCut
 
 Please see AUTHORS for contributors.
-https://github.com/AlexEMG/DeepLabCut/blob/master/AUTHORS
+https://github.com/DeepLabCut/DeepLabCut/blob/master/AUTHORS
 Licensed under GNU Lesser General Public License v3.0
 """
 import logging
 import os
 import os.path
-import shutil
 
 from functools import lru_cache
 from pathlib import Path
+from PIL import Image
 
 import numpy as np
 import pandas as pd
@@ -143,7 +143,7 @@ def dropduplicatesinannotatinfiles(config):
     for folder in folders:
         try:
             fn = os.path.join(str(folder), "CollectedData_" + cfg["scorer"] + ".h5")
-            DC = pd.read_hdf(fn, "df_with_missing")
+            DC = pd.read_hdf(fn)
             numimages = len(DC.index)
             DC = DC[~DC.index.duplicated(keep="first")]
             if len(DC.index) < numimages:
@@ -175,7 +175,7 @@ def dropannotationfileentriesduetodeletedimages(config):
 
     for folder in folders:
         fn = os.path.join(str(folder), "CollectedData_" + cfg["scorer"] + ".h5")
-        DC = pd.read_hdf(fn, "df_with_missing")
+        DC = pd.read_hdf(fn)
         dropped = False
         for imagename in DC.index:
             if os.path.isfile(os.path.join(cfg["project_path"], imagename)):
@@ -208,7 +208,7 @@ def dropimagesduetolackofannotation(config):
 
     for folder in folders:
         fn = os.path.join(str(folder), "CollectedData_" + cfg["scorer"] + ".h5")
-        DC = pd.read_hdf(fn, "df_with_missing")
+        DC = pd.read_hdf(fn)
         dropped = False
         annotatedimages = [fn.split(os.sep)[-1] for fn in DC.index]
         imagelist = [fns for fns in os.listdir(str(folder)) if ".png" in fns]
@@ -242,7 +242,7 @@ def cropimagesandlabels(
     size=(400, 400),
     userfeedback=True,
     cropdata=True,
-    excludealreadycropped=True,
+    excludealreadycropped=False,
     updatevideoentries=True,
 ):
     """
@@ -268,8 +268,10 @@ def cropimagesandlabels(
     cropdata: bool, default True:
         If true creates corresponding annotation data (from ground truth)
 
-    excludealreadycropped: bool, def true
-        If true excludes folders that already contain _cropped in their name.
+    excludealreadycropped: bool, default False:
+        If true, ignore original videos whose frames are already cropped.
+        This is only useful after adding new videos post dataset creation,
+        as folders containing no new frames are otherwise automatically ignored.
 
     updatevideoentries, bool, default true
         If true updates video_list entries to refer to cropped frames instead. This makes sense for subsequent processing.
@@ -286,20 +288,25 @@ def cropimagesandlabels(
     indexlength = int(np.ceil(np.log10(numcrops)))
     project_path = os.path.dirname(config)
     cfg = auxiliaryfunctions.read_config(config)
-    videos = cfg["video_sets"].keys()
-    video_names = []
-    for video in videos:
-        parent, filename, ext = _robust_path_split(video)
-        if excludealreadycropped and "_cropped" in filename:
-            continue
-        video_names.append([parent, filename, ext])
+    videos = list(cfg.get("video_sets_original", []))
+    if not videos:
+        videos = list(cfg["video_sets"])
+    elif excludealreadycropped:
+        for video in videos:
+            _, ext = os.path.splitext(video)
+            s = video.replace(ext, f"_cropped{ext}")
+            if s in cfg["video_sets"]:
+                videos.remove(video)
+    if not videos:
+        return
 
     if (
         "video_sets_original" not in cfg.keys() and updatevideoentries
     ):  # this dict is kept for storing links to original full-sized videos
         cfg["video_sets_original"] = {}
 
-    for vidpath, vidname, videotype in video_names:
+    for video in videos:
+        vidpath, vidname, videotype = _robust_path_split(video)
         folder = os.path.join(project_path, "labeled-data", vidname)
         if userfeedback:
             print("Do you want to crop frames for folder: ", folder, "?")
@@ -315,11 +322,17 @@ def cropimagesandlabels(
             pd_index = []
 
             fn = os.path.join(folder, f"CollectedData_{cfg['scorer']}.h5")
-            df = pd.read_hdf(fn, "df_with_missing")
+            df = pd.read_hdf(fn)
             data = df.values.reshape((df.shape[0], -1, 2))
             sep = "/" if "/" in df.index[0] else "\\"
             if sep != os.path.sep:
                 df.index = df.index.str.replace(sep, os.path.sep)
+            video_new = sep.join((vidpath, new_vidname + videotype))
+            if video_new in cfg["video_sets"]:
+                _, w, _, h = map(int, cfg["video_sets"][video_new]["crop"].split(","))
+                temp_size = (h, w)
+            else:
+                temp_size = size
             images = project_path + os.path.sep + df.index
             # Avoid cropping already cropped images
             cropped_images = auxiliaryfunctions.grab_files_in_folder(new_folder, "png")
@@ -327,12 +340,13 @@ def cropimagesandlabels(
             imnames = [
                 im for im in images.to_list() if Path(im).stem not in cropped_names
             ]
+            if not imnames:
+                continue
             ic = io.imread_collection(imnames)
             for i in trange(len(ic)):
                 frame = ic[i]
                 h, w = np.shape(frame)[:2]
-                if size[0] >= h or size[1] >= w:
-                    shutil.rmtree(new_folder, ignore_errors=True)
+                if temp_size[0] >= h or temp_size[1] >= w:
                     raise ValueError("Crop dimensions are larger than image size")
 
                 imagename = os.path.relpath(ic.files[i], project_path)
@@ -342,11 +356,11 @@ def cropimagesandlabels(
                 while cropindex < numcrops:
                     dd = np.array(data[ind].copy(), dtype=float)
                     y0, x0 = (
-                        np.random.randint(h - size[0]),
-                        np.random.randint(w - size[1]),
+                        np.random.randint(h - temp_size[0]),
+                        np.random.randint(w - temp_size[1]),
                     )
-                    y1 = y0 + size[0]
-                    x1 = x0 + size[1]
+                    y1 = y0 + temp_size[0]
+                    x1 = x0 + temp_size[1]
                     with np.errstate(invalid="ignore"):
                         within = np.all((dd >= [x0, y0]) & (dd < [x1, y1]), axis=1)
                     if cropdata:
@@ -371,66 +385,33 @@ def cropimagesandlabels(
             if cropdata:
                 df = pd.DataFrame(AnnotationData, index=pd_index, columns=df.columns)
                 fn_new = fn.replace(folder, new_folder)
+                try:
+                    df_old = pd.read_hdf(fn_new)
+                    df = pd.concat((df_old, df))
+                except FileNotFoundError:
+                    pass
                 df.to_hdf(fn_new, key="df_with_missing", mode="w")
                 df.to_csv(fn_new.replace(".h5", ".csv"))
 
             if updatevideoentries and cropdata:
                 # moving old entry to _original, dropping it from video_set and update crop parameters
                 video_orig = sep.join((vidpath, vidname + videotype))
-                cfg["video_sets_original"][video_orig] = cfg["video_sets"][video_orig]
-                cfg["video_sets"].pop(video_orig)
-                cfg["video_sets"][sep.join((vidpath, new_vidname + videotype))] = {
-                    "crop": ", ".join(map(str, [0, size[1], 0, size[0]]))
-                }
+                video_new = sep.join((vidpath, new_vidname + videotype))
+                if video_orig not in cfg["video_sets_original"]:
+                    cfg["video_sets_original"][video_orig] = cfg["video_sets"][
+                        video_orig
+                    ]
+                    cfg["video_sets"].pop(video_orig)
+                    cfg["video_sets"][video_new] = {
+                        "crop": ", ".join(map(str, [0, temp_size[1], 0, temp_size[0]]))
+                    }
+                elif video_new not in cfg["video_sets"]:
+                    cfg["video_sets"][video_new] = {
+                        "crop": ", ".join(map(str, [0, temp_size[1], 0, temp_size[0]]))
+                    }
 
     cfg["croppedtraining"] = True
     auxiliaryfunctions.write_config(config, cfg)
-
-
-def label_frames(config, multiple_individualsGUI=False, imtypes=["*.png"]):
-    """
-    Manually label/annotate the extracted frames. Update the list of body parts you want to localize in the config.yaml file first.
-
-    Parameter
-    ----------
-    config : string
-        String containing the full path of the config file in the project.
-
-    multiple_individualsGUI: bool, optional
-          If this is set to True, a user can label multiple individuals. Note for "multianimalproject=True" this is automatically used.
-          The default is ``False``; if provided it must be either ``True`` or ``False``.
-
-    imtypes: list of imagetypes to look for in folder to be labeled. By default only png images are considered.
-
-    Example
-    --------
-    Standard use case:
-    >>> deeplabcut.label_frames('/myawesomeproject/reaching4thestars/config.yaml')
-
-    To label multiple individuals (without having a multiple individuals project); otherwise this GUI is loaded automatically
-    >>> deeplabcut.label_frames('/analysis/project/reaching-task/config.yaml',multiple_individualsGUI=True)
-
-    To label other image types
-    >>> label_frames(config,multiple=False,imtypes=['*.jpg','*.jpeg'])
-    --------
-
-    """
-    startpath = os.getcwd()
-    wd = Path(config).resolve().parents[0]
-    os.chdir(str(wd))
-    cfg = auxiliaryfunctions.read_config(config)
-    if cfg.get("multianimalproject", False) or multiple_individualsGUI:
-        from deeplabcut.generate_training_dataset import (
-            multiple_individuals_labeling_toolbox,
-        )
-
-        multiple_individuals_labeling_toolbox.show(config)
-    else:
-        from deeplabcut.generate_training_dataset import labeling_toolbox
-
-        labeling_toolbox.show(config, imtypes=imtypes)
-
-    os.chdir(startpath)
 
 
 def check_labels(
@@ -487,8 +468,7 @@ def check_labels(
     for folder in folders:
         try:
             DataCombined = pd.read_hdf(
-                os.path.join(str(folder), "CollectedData_" + cfg["scorer"] + ".h5"),
-                "df_with_missing",
+                os.path.join(str(folder), "CollectedData_" + cfg["scorer"] + ".h5")
             )
             if cfg.get("multianimalproject", False):
                 color_by = "individual" if visualizeindividuals else "bodypart"
@@ -579,7 +559,14 @@ def MakeInference_yaml(itemstochange, saveasconfigfile, defaultconfigfile):
 
 def _robust_path_split(path):
     sep = "\\" if "\\" in path else "/"
-    parent, file = path.rsplit(sep, 1)
+    splits = path.rsplit(sep, 1)
+    if len(splits) == 1:
+        parent = '.'
+        file = splits[0]
+    elif len(splits) == 2:
+        parent, file = splits
+    else:
+        raise('Unknown filepath split for path {}'.format(path))
     filename, ext = os.path.splitext(file)
     return parent, filename, ext
 
@@ -601,7 +588,7 @@ def merge_annotateddatasets(cfg, trainingsetfolder_full, windows2linux):
             data_path / filename, f'CollectedData_{cfg["scorer"]}.h5'
         )
         try:
-            data = pd.read_hdf(file_path, "df_with_missing")
+            data = pd.read_hdf(file_path)
             AnnotationData.append(data)
         except FileNotFoundError:
             print(
@@ -721,6 +708,7 @@ def mergeandsplit(config, trainindex=0, uniform=True, windows2linux=False):
 
     To freeze a (uniform) split (i.e. iid sampled from all the data):
     >>> trainIndices, testIndices=deeplabcut.mergeandsplit(config,trainindex=0,uniform=True)
+
     You can then create two model instances that have the identical trainingset. Thereby you can assess the role of various parameters on the performance of DLC.
     >>> deeplabcut.create_training_dataset(config,Shuffles=[0,1],trainIndices=[trainIndices, trainIndices],testIndices=[testIndices, testIndices])
     --------
@@ -740,7 +728,7 @@ def mergeandsplit(config, trainindex=0, uniform=True, windows2linux=False):
     fn = os.path.join(project_path, trainingsetfolder, "CollectedData_" + cfg["scorer"])
 
     try:
-        Data = pd.read_hdf(fn + ".h5", "df_with_missing")
+        Data = pd.read_hdf(fn + ".h5")
     except FileNotFoundError:
         Data = merge_annotateddatasets(
             cfg,
@@ -773,8 +761,11 @@ def mergeandsplit(config, trainindex=0, uniform=True, windows2linux=False):
 
 
 @lru_cache(maxsize=None)
-def _read_image_shape_fast(path):
-    return io.imread(path).shape
+def read_image_shape_fast(path):
+    # Blazing fast and does not load the image into memory
+    with Image.open(path) as img:
+        width, height = img.size
+        return len(img.getbands()), height, width
 
 
 def format_training_data(df, train_inds, nbodyparts, project_path):
@@ -790,18 +781,15 @@ def format_training_data(df, train_inds, nbodyparts, project_path):
         data = dict()
         filename = df.index[i]
         data["image"] = filename
-        img_shape = _read_image_shape_fast(os.path.join(project_path, filename))
-        try:
-            data["size"] = img_shape[2], img_shape[0], img_shape[1]
-        except IndexError:
-            data["size"] = 1, img_shape[0], img_shape[1]
+        img_shape = read_image_shape_fast(os.path.join(project_path, filename))
+        data["size"] = img_shape
         temp = df.iloc[i].values.reshape(-1, 2)
         joints = np.c_[range(nbodyparts), temp]
         joints = joints[~np.isnan(joints).any(axis=1)].astype(int)
         # Check that points lie within the image
         inside = np.logical_and(
-            np.logical_and(joints[:, 1] < img_shape[1], joints[:, 1] > 0),
-            np.logical_and(joints[:, 2] < img_shape[0], joints[:, 2] > 0),
+            np.logical_and(joints[:, 1] < img_shape[2], joints[:, 1] > 0),
+            np.logical_and(joints[:, 2] < img_shape[1], joints[:, 2] > 0),
         )
         if not all(inside):
             joints = joints[inside]
@@ -867,8 +855,8 @@ def create_training_dataset(
 
     net_type: list
         Type of networks. Currently resnet_50, resnet_101, resnet_152, mobilenet_v2_1.0, mobilenet_v2_0.75,
-        mobilenet_v2_0.5, mobilenet_v2_0.35, efficientnet_b0, efficientnet_b1, efficientnet_b2, efficientnet_b3,
-        efficientnet_b4, efficientnet_b5, and efficientnet_b6 are supported.
+        mobilenet_v2_0.5, mobilenet_v2_0.35, efficientnet-b0, efficientnet-b1, efficientnet-b2, efficientnet-b3,
+        efficientnet-b4, efficientnet-b5, and efficientnet-b6 are supported.
 
     augmenter_type: string
         Type of augmenter. Currently default, imgaug, tensorpack, and deterministic are supported.
@@ -917,7 +905,11 @@ def create_training_dataset(
         if net_type is None:  # loading & linking pretrained models
             net_type = cfg.get("default_net_type", "resnet_50")
         else:
-            if "resnet" in net_type or "mobilenet" in net_type or "efficientnet" in net_type:
+            if (
+                "resnet" in net_type
+                or "mobilenet" in net_type
+                or "efficientnet" in net_type
+            ):
                 pass
             else:
                 raise ValueError("Invalid network type:", net_type)
@@ -928,16 +920,13 @@ def create_training_dataset(
                 # updating variable if null/None! #backwardscompatability
                 auxiliaryfunctions.edit_config(config, {"default_augmenter": "imgaug"})
                 augmenter_type = "imgaug"
-        else:
-            if augmenter_type in [
+        elif augmenter_type not in [
                 "default",
                 "scalecrop",
                 "imgaug",
                 "tensorpack",
                 "deterministic",
             ]:
-                pass
-            else:
                 raise ValueError("Invalid augmenter type:", augmenter_type)
 
         # Loading the encoder (if necessary downloading from TF)
@@ -1161,8 +1150,8 @@ def create_training_model_comparison(
 
     net_types: list
         Type of networks. Currently resnet_50, resnet_101, resnet_152, mobilenet_v2_1.0,mobilenet_v2_0.75, mobilenet_v2_0.5, mobilenet_v2_0.35,
-        efficientnet_b0, efficientnet_b1, efficientnet_b2, efficientnet_b3, efficientnet_b4,
-        efficientnet_b5, and efficientnet_b6 are supported.
+        efficientnet-b0, efficientnet-b1, efficientnet-b2, efficientnet-b3, efficientnet-b4,
+        efficientnet-b5, and efficientnet-b6 are supported.
 
     augmenter_types: list
         Type of augmenters. Currently "default", "imgaug", "tensorpack", and "deterministic" are supported.

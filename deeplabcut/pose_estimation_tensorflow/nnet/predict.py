@@ -33,25 +33,31 @@ else:
 from deeplabcut.pose_estimation_tensorflow.nnet.net_factory import pose_net
 
 
-def setup_pose_prediction(cfg):
+def setup_pose_prediction(cfg,allow_growth=False):
     TF.reset_default_graph()
-    inputs = TF.placeholder(tf.float32, shape=[cfg.batch_size, None, None, 3])
+    inputs = TF.placeholder(tf.float32, shape=[cfg["batch_size"], None, None, 3])
     net_heads = pose_net(cfg).test(inputs)
     outputs = [net_heads["part_prob"]]
-    if cfg.location_refinement:
+    if cfg["location_refinement"]:
         outputs.append(net_heads["locref"])
 
-    if ("multi-animal" in cfg.dataset_type) and cfg.partaffinityfield_predict:
+    if ("multi-animal" in cfg["dataset_type"]) and cfg["partaffinityfield_predict"]:
         print("Activating extracting of PAFs")
         outputs.append(net_heads["pairwise_pred"])
 
     restorer = TF.train.Saver()
-    sess = TF.Session()
+
+    if allow_growth == True:
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True
+        sess = TF.Session(config=config)
+    else:
+        sess = TF.Session()
     sess.run(TF.global_variables_initializer())
     sess.run(TF.local_variables_initializer())
 
     # Restore variables from disk.
-    restorer.restore(sess, cfg.init_weights)
+    restorer.restore(sess, cfg["init_weights"])
 
     return sess, inputs, outputs
 
@@ -61,11 +67,11 @@ def extract_cnn_output(outputs_np, cfg):
     scmap = outputs_np[0]
     scmap = np.squeeze(scmap)
     locref = None
-    if cfg.location_refinement:
+    if cfg["location_refinement"]:
         locref = np.squeeze(outputs_np[1])
         shape = locref.shape
         locref = np.reshape(locref, (shape[0], shape[1], -1, 2))
-        locref *= cfg.locref_stdev
+        locref *= cfg["locref_stdev"]
     if len(scmap.shape) == 2:  # for single body part!
         scmap = np.expand_dims(scmap, axis=2)
     return scmap, locref
@@ -116,9 +122,9 @@ def getpose(image, cfg, sess, inputs, outputs, outall=False):
     scmap, locref = extract_cnn_output(outputs_np, cfg)
     num_outputs = cfg.get("num_outputs", 1)
     if num_outputs > 1:
-        pose = multi_pose_predict(scmap, locref, cfg.stride, num_outputs)
+        pose = multi_pose_predict(scmap, locref, cfg["stride"], num_outputs)
     else:
-        pose = argmax_pose_predict(scmap, locref, cfg.stride)
+        pose = argmax_pose_predict(scmap, locref, cfg["stride"])
     if outall:
         return scmap, locref, pose
     else:
@@ -131,11 +137,11 @@ def extract_cnn_outputmulti(outputs_np, cfg):
     Dimensions: image batch x imagedim1 x imagedim2 x bodypart"""
     scmap = outputs_np[0]
     locref = None
-    if cfg.location_refinement:
+    if cfg["location_refinement"]:
         locref = outputs_np[1]
         shape = locref.shape
         locref = np.reshape(locref, (shape[0], shape[1], shape[2], -1, 2))
-        locref *= cfg.locref_stdev
+        locref *= cfg["locref_stdev"]
     if len(scmap.shape) == 2:  # for single body part!
         scmap = np.expand_dims(scmap, axis=2)
     return scmap, locref
@@ -180,8 +186,8 @@ def getposeNP(image, cfg, sess, inputs, outputs, outall=False):
                 DZ[m, l, k, :2] = locref[l, y, x, k, :]
                 DZ[m, l, k, 2] = scmap[l, y, x, k]
 
-    X = X.astype("float32") * cfg.stride + 0.5 * cfg.stride + DZ[:, :, :, 0]
-    Y = Y.astype("float32") * cfg.stride + 0.5 * cfg.stride + DZ[:, :, :, 1]
+    X = X.astype("float32") * cfg["stride"] + 0.5 * cfg["stride"] + DZ[:, :, :, 0]
+    Y = Y.astype("float32") * cfg["stride"] + 0.5 * cfg["stride"] + DZ[:, :, :, 1]
     P = DZ[:, :, :, 2]
 
     Xs = X.swapaxes(0, 2).swapaxes(0, 1)
@@ -202,20 +208,26 @@ def getposeNP(image, cfg, sess, inputs, outputs, outall=False):
 
 
 ### Code for TF inference on GPU
-def setup_GPUpose_prediction(cfg):
+def setup_GPUpose_prediction(cfg,allow_growth=False):
     tf.reset_default_graph()
-    inputs = tf.placeholder(tf.float32, shape=[cfg.batch_size, None, None, 3])
+    inputs = tf.placeholder(tf.float32, shape=[cfg["batch_size"], None, None, 3])
     net_heads = pose_net(cfg).inference(inputs)
     outputs = [net_heads["pose"]]
 
     restorer = tf.train.Saver()
-    sess = tf.Session()
+
+    if allow_growth == True:
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True
+        sess = TF.Session(config=config)
+    else:
+        sess = TF.Session()
 
     sess.run(tf.global_variables_initializer())
     sess.run(tf.local_variables_initializer())
 
     # Restore variables from disk.
-    restorer.restore(sess, cfg.init_weights)
+    restorer.restore(sess, cfg["init_weights"])
 
     return sess, inputs, outputs
 

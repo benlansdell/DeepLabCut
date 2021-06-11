@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FFMpegWriter
 from matplotlib.collections import LineCollection
-from skimage.draw import circle, line_aa
+from skimage.draw import disk, line_aa
 from skimage.util import img_as_ubyte
 from tqdm import trange
 
@@ -88,7 +88,7 @@ def CreateVideo(
         ny, nx = clip.height(), clip.width()
 
     fps = clip.fps()
-    nframes = len(Dataframe.index)
+    nframes = clip.nframes
     duration = nframes / fps
 
     print(
@@ -103,7 +103,7 @@ def CreateVideo(
     )
     print("Generating frames and creating video.")
 
-    df_x, df_y, df_likelihood = Dataframe.values.reshape((nframes, -1, 3)).T
+    df_x, df_y, df_likelihood = Dataframe.values.reshape((len(Dataframe), -1, 3)).T
     if cropping and not displaycropped:
         df_x += x1
         df_y += y1
@@ -134,7 +134,7 @@ def CreateVideo(
     colors = (C[:, :3] * 255).astype(np.uint8)
 
     with np.errstate(invalid="ignore"):
-        for index in trange(nframes):
+        for index in trange(min(nframes, len(Dataframe))):
             image = clip.load_frame()
             if displaycropped:
                 image = image[y1:y2, x1:x2]
@@ -163,15 +163,14 @@ def CreateVideo(
                         color = colors[num_ind]
                     if trailpoints > 0:
                         for k in range(1, min(trailpoints, index + 1)):
-                            rr, cc = circle(
-                                df_y[ind, index - k],
-                                df_x[ind, index - k],
+                            rr, cc = disk(
+                                (df_y[ind, index - k], df_x[ind, index - k]),
                                 dotsize,
                                 shape=(ny, nx),
                             )
                             image[rr, cc] = color
-                    rr, cc = circle(
-                        df_y[ind, index], df_x[ind, index], dotsize, shape=(ny, nx)
+                    rr, cc = disk(
+                        (df_y[ind, index], df_x[ind, index]), dotsize, shape=(ny, nx)
                     )
                     image[rr, cc] = color
 
@@ -215,9 +214,9 @@ def CreateVideoSlow(
 
     fps = clip.fps()
     if outputframerate is None:  # by def. same as input rate.
-        outputframerate = clip.fps()
+        outputframerate = fps
 
-    nframes = len(Dataframe.index)
+    nframes = clip.nframes
     duration = nframes / fps
 
     print(
@@ -231,7 +230,7 @@ def CreateVideoSlow(
         )
     )
     print("Generating frames and creating video.")
-    df_x, df_y, df_likelihood = Dataframe.values.reshape((nframes, -1, 3)).T
+    df_x, df_y, df_likelihood = Dataframe.values.reshape((len(Dataframe), -1, 3)).T
     if cropping and not displaycropped:
         df_x += x1
         df_y += y1
@@ -281,9 +280,9 @@ def CreateVideoSlow(
     fig = plt.figure(frameon=False, figsize=(nx / dpi, ny / dpi))
     ax = fig.add_subplot(111)
 
-    writer = FFMpegWriter(fps=fps, codec="h264")
+    writer = FFMpegWriter(fps=outputframerate, codec="h264")
     with writer.saving(fig, videooutname, dpi=dpi), np.errstate(invalid="ignore"):
-        for index in trange(nframes):
+        for index in trange(min(nframes, len(Dataframe))):
             imagename = tmpfolder + "/file" + str(index).zfill(nframes_digits) + ".png"
             image = img_as_ubyte(clip.load_frame())
             if index in Index:  # then extract the frame!
@@ -649,9 +648,10 @@ def proc_video(
                         codec=codec,
                         sw=x2 - x1,
                         sh=y2 - y1,
+                        fps=outputframerate,
                     )
                 else:  # then the full video + the (perhaps in cropped mode analyzed labels) are depicted
-                    clip = vp(fname=video, sname=videooutname, codec=codec)
+                    clip = vp(fname=video, sname=videooutname, codec=codec, fps=outputframerate)
                 CreateVideo(
                     clip,
                     df,
@@ -757,7 +757,13 @@ def create_video_with_keypoints_only(
 
 
 def create_video_with_all_detections(
-    config, videos, DLCscorername, displayedbodyparts="all", destfolder=None
+    config,
+    videos,
+    shuffle=1,
+    trainingsetindex=0,
+    displayedbodyparts="all",
+    destfolder=None,
+    modelprefix="",
 ):
     """
     Create a video labeled with all the detections stored in a '*_full.pickle' file.
@@ -771,8 +777,11 @@ def create_video_with_all_detections(
         A list of strings containing the full paths to videos for analysis or a path to the directory,
         where all the videos with same extension are stored.
 
-    DLCscorername: str
-        Name of network. E.g. 'DLC_resnet50_project_userMar23shuffle1_50000
+    shuffle : int, optional
+        Number of shuffles of training dataset. Default is set to 1.
+
+    trainingsetindex: int, optional
+        Integer specifying which TrainingsetFraction to use. By default the first (note that TrainingFraction is a list in config.yaml).
 
     displayedbodyparts: list of strings, optional
         This selects the body parts that are plotted in the video. Either ``all``, then all body parts
@@ -783,12 +792,14 @@ def create_video_with_all_detections(
         Specifies the destination folder that was used for storing analysis data (default is the path of the video).
 
     """
-    from deeplabcut.pose_estimation_tensorflow.lib.inferenceutils import (
-        convertdetectiondict2listoflist,
-    )
+    from deeplabcut.pose_estimation_tensorflow.lib.inferenceutils import Assembler
     import pickle, re
 
     cfg = auxiliaryfunctions.read_config(config)
+    trainFraction = cfg["TrainingFraction"][trainingsetindex]
+    DLCscorername, _ = auxiliaryfunctions.GetScorerName(
+        cfg, shuffle, trainFraction, modelprefix=modelprefix
+    )
 
     for video in videos:
         videofolder = os.path.splitext(video)[0]
@@ -838,13 +849,13 @@ def create_video_with_all_detections(
                 frame = clip.load_frame()
                 try:
                     ind = frames.index(n)
-                    dets = convertdetectiondict2listoflist(data[frame_names[ind]], bpts)
-                    for i, det in enumerate(dets):
-                        color = colors[i]
-                        for x, y, p, _ in det:
-                            if p > pcutoff:
-                                rr, cc = circle(y, x, dotsize, shape=(ny, nx))
-                                frame[rr, cc] = color
+                    dets = Assembler._flatten_detections(data[frame_names[ind]])
+                    for det in dets:
+                        if det.label not in bpts or det.confidence < pcutoff:
+                            continue
+                        x, y = det.pos
+                        rr, cc = disk((y, x), dotsize, shape=(ny, nx))
+                        frame[rr, cc] = colors[bpts.index(det.label)]
                 except ValueError:  # No data stored for that particular frame
                     print(n, "no data")
                     pass

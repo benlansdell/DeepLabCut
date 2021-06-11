@@ -7,7 +7,6 @@ import logging
 import pprint
 
 import yaml
-from easydict import EasyDict as edict
 
 
 def _merge_a_into_b(a, b):
@@ -15,21 +14,21 @@ def _merge_a_into_b(a, b):
     Merge config dictionary a into config dictionary b, clobbering the
     options in b whenever they are also specified in a.
     """
-    if type(a) is not edict:
-        return
-
     for k, v in a.items():
         # a must specify keys that are in b
         # if k not in b:
         #    raise KeyError('{} is not a valid config key'.format(k))
 
         # recursively merge dicts
-        if type(v) is edict:
-            try:
-                _merge_a_into_b(a[k], b[k])
-            except:
-                print("Error under config key: {}".format(k))
-                raise
+        if isinstance(v, dict):
+            if not b.get(k, False):
+                b[k] = v
+            else:
+                try:
+                    _merge_a_into_b(a[k], b[k])
+                except:
+                    print("Error under config key: {}".format(k))
+                    raise
         else:
             b[k] = v
 
@@ -39,7 +38,7 @@ def cfg_from_file(filename):
     Load a config from file filename and merge it into the default options.
     """
     with open(filename, "r") as f:
-        yaml_cfg = edict(yaml.load(f, Loader=yaml.SafeLoader))
+        yaml_cfg = yaml.load(f, Loader=yaml.SafeLoader)
 
     # Update the snapshot path to the corresponding path!
     trainpath = str(filename).split("pose_cfg.yaml")[0]

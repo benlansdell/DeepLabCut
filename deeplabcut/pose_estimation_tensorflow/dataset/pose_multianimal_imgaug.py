@@ -33,13 +33,13 @@ class MAPoseDataset:
         self.cfg = cfg
         self.data = self.load_dataset()
         self.num_images = len(self.data)
-        self.batch_size = cfg.batch_size
+        self.batch_size = cfg["batch_size"]
         print("Batch Size is %d" % self.batch_size)
 
     def load_dataset(self):
         cfg = self.cfg
-        file_name = os.path.join(self.cfg.project_path, cfg.dataset)
-        with open(os.path.join(self.cfg.project_path, file_name), "rb") as f:
+        file_name = os.path.join(self.cfg["project_path"], cfg["dataset"])
+        with open(os.path.join(self.cfg["project_path"], file_name), "rb") as f:
             # Pickle the 'data' dictionary using the highest protocol available.
             pickledata = pickle.load(f)
 
@@ -127,7 +127,8 @@ class MAPoseDataset:
         if height is not None and width is not None:
             pipeline.add(
                 iaa.Sometimes(
-                    cfg.cropratio, iaa.CropAndPad(percent=(-0.3, 0.1), keep_size=False)
+                    cfg.get("cropratio", 0.4),
+                    iaa.CropAndPad(percent=(-0.3, 0.1), keep_size=False),
                 )
             )
             pipeline.add(iaa.Resize({"height": height, "width": width}))
@@ -150,7 +151,7 @@ class MAPoseDataset:
             if self.is_valid_size(target_size):
                 break
 
-        stride = self.cfg.stride
+        stride = self.cfg["stride"]
         for i in range(self.batch_size):
             data_item = self.data[img_idx[i]]
 
@@ -158,7 +159,7 @@ class MAPoseDataset:
             im_file = data_item.im_path
 
             logging.debug("image %s", im_file)
-            image = imread(os.path.join(self.cfg.project_path, im_file), mode="RGB")
+            image = imread(os.path.join(self.cfg["project_path"], im_file), mode="RGB")
             if self.has_gt:
                 Joints = data_item.joints
                 joint_id = [
@@ -175,6 +176,11 @@ class MAPoseDataset:
         sm_size = np.ceil(target_size / (stride * self.cfg.get("smfactor", 2))).astype(
             int
         ) * self.cfg.get("smfactor", 2)
+
+        if stride == 2:
+            sm_size = np.ceil(target_size / 16).astype(int)
+            sm_size *= 8
+
         # assert len(batch_images) == self.batch_size
         return batch_images, joint_ids, batch_joints, data_items, sm_size, target_size
 
@@ -262,7 +268,9 @@ class MAPoseDataset:
                     )
                     im = kps.draw_on_image(batch_images[i])
                     # imageio.imwrite(data_items[i].im_path.split('/')[-1],im)
-                    imageio.imwrite(self.cfg.project_path + "/" + str(i) + ".png", im)
+                    imageio.imwrite(
+                        os.path.join(self.cfg["project_path"], str(i) + ".png"), im
+                    )
 
             image_shape = arr(batch_images).shape[1:3]
             batch = {Batch.inputs: arr(batch_images).astype(np.float64)}
@@ -284,15 +292,15 @@ class MAPoseDataset:
 
     def num_training_samples(self):
         num = self.num_images
-        if self.cfg.mirror:
+        if self.cfg["mirror"]:
             num *= 2
         return num
 
     def get_scale(self):
         cfg = self.cfg
-        scale = cfg.global_scale
+        scale = cfg["global_scale"]
         if hasattr(cfg, "scale_jitter_lo") and hasattr(cfg, "scale_jitter_up"):
-            scale_jitter = rand.uniform(cfg.scale_jitter_lo, cfg.scale_jitter_up)
+            scale_jitter = rand.uniform(cfg["scale_jitter_lo"], cfg["scale_jitter_up"])
             scale *= scale_jitter
         return scale
 
@@ -303,14 +311,14 @@ class MAPoseDataset:
         if im_height < min_input_size or im_width < min_input_size:
             return False
         if hasattr(self.cfg, "max_input_size"):
-            max_input_size = self.cfg.max_input_size
+            max_input_size = self.cfg["max_input_size"]
             if im_width * im_height > max_input_size * max_input_size:
                 return False
         return True
 
     def compute_scmap_weights(self, scmap_shape, joint_id, data_item):
         cfg = self.cfg
-        if cfg.weigh_only_present_joints:
+        if cfg["weigh_only_present_joints"]:
             weights = np.zeros(scmap_shape)
             for k, j_id in enumerate(
                 np.concatenate(joint_id)
@@ -323,23 +331,23 @@ class MAPoseDataset:
     def compute_target_part_scoremap_numpy(
         self, joint_id, coords, data_item, size, scale
     ):
-        stride = self.cfg.stride
-        dist_thresh = float(self.cfg.pos_dist_thresh * scale)
+        stride = self.cfg["stride"]
+        dist_thresh = float(self.cfg["pos_dist_thresh"] * scale)
         num_idchannel = self.cfg.get("num_idchannel", 0)
 
-        num_joints = self.cfg.num_joints
+        num_joints = self.cfg["num_joints"]
         half_stride = stride / 2
 
         scmap = np.zeros(cat([size, arr([num_joints + num_idchannel])]))
         locref_size = cat([size, arr([num_joints * 2])])
 
         locref_map = np.zeros(locref_size)
-        locref_scale = 1.0 / self.cfg.locref_stdev
+        locref_scale = 1.0 / self.cfg["locref_stdev"]
         dist_thresh_sq = dist_thresh ** 2
 
-        partaffinityfield_shape = cat([size, arr([self.cfg.num_limbs * 2])])
+        partaffinityfield_shape = cat([size, arr([self.cfg["num_limbs"] * 2])])
         partaffinityfield_map = np.zeros(partaffinityfield_shape)
-        if self.cfg.weigh_only_present_joints:
+        if self.cfg["weigh_only_present_joints"]:
             partaffinityfield_mask = np.zeros(partaffinityfield_shape)
             locref_mask = np.zeros(locref_size)
         else:
@@ -373,7 +381,7 @@ class MAPoseDataset:
             mask3 = (y >= min_y) & (y <= max_y)
             mask = mask1 & mask2 & mask3
             scmap[mask, j_id] = 1
-            if self.cfg.weigh_only_present_joints:
+            if self.cfg["weigh_only_present_joints"]:
                 locref_mask[mask, j_id * 2 + 0] = 1.0
                 locref_mask[mask, j_id * 2 + 1] = 1.0
             locref_map[mask, j_id * 2 + 0] = (dx * locref_scale)[mask]
@@ -381,9 +389,11 @@ class MAPoseDataset:
 
         if num_idchannel > 0:
             coordinateoffset = 0
-            for person_id in range(len(joint_id)):
+            # Find indices of individuals in joint_id
+            idx = [i for i, id_ in enumerate(data_item.joints)
+                   if id_ < num_idchannel]
+            for person_id in idx:
                 joint_ids = joint_id[person_id].copy()
-                # print(person_id,joint_ids,data_item.im_path.split('/')[-1])
                 if len(joint_ids) > 1:
                     for k, j_id in enumerate(joint_ids):
                         joint_pt = coords[0][k + coordinateoffset, :]
@@ -420,8 +430,8 @@ class MAPoseDataset:
             joint_ids = joint_id[person_id].copy()
             if len(joint_ids) > 1:  # otherwise there cannot be a joint!
                 # CONSIDER SMARTER SEARCHES here... (i.e. calculate the bpts beforehand?)
-                for l in range(self.cfg.num_limbs):
-                    bp1, bp2 = self.cfg.partaffinityfield_graph[l]
+                for l in range(self.cfg["num_limbs"]):
+                    bp1, bp2 = self.cfg["partaffinityfield_graph"][l]
                     I1 = np.where(np.array(joint_ids) == bp1)[0]
                     I2 = np.where(np.array(joint_ids) == bp2)[0]
                     if (len(I1) > 0) * (len(I2) > 0):
@@ -460,20 +470,9 @@ class MAPoseDataset:
                                     - d2mid
                                 )
                                 * 1.0
-                                / self.cfg.pafwidth
+                                / self.cfg["pafwidth"]
                                 * scale
                             )
-
-                            """
-                                import matplotlib.pyplot as plt
-                                plt.figure()
-                                plt.imshow(distance_along)
-                                #plt.savefig("along"+str(data_item.im_path.split('/')[-1]))
-                                plt.savefig(str(data_item.im_path.split('/')[-1]).split('png')[0]+"maps.png")
-                                plt.figure()
-                                plt.imshow(abs(distance_across))
-                                plt.savefig("across"+str(data_item.im_path.split('/')[-1]))
-                                """
 
                             mask1 = (distance_along >= d1lowerboundary) & (
                                 distance_along <= d1upperboundary
@@ -482,7 +481,7 @@ class MAPoseDataset:
                             # mask3 = ((x >= 0) & (x <= width-1))
                             # mask4 = ((y >= 0) & (y <= height-1))
                             mask = mask1 & mask2  # &mask3 &mask4
-                            if self.cfg.weigh_only_present_joints:
+                            if self.cfg["weigh_only_present_joints"]:
                                 partaffinityfield_mask[mask, l * 2 + 0] = 1.0
                                 partaffinityfield_mask[mask, l * 2 + 1] = 1.0
 
@@ -495,52 +494,6 @@ class MAPoseDataset:
 
             coordinateoffset += len(joint_ids)  # keeping track of the blocks
 
-        #        print(person_id,k, j_id, coords[0])
-        # assert(0==1)
-
-        """
-        import matplotlib.pyplot as plt
-        print('shape',np.shape(scmap))
-        A=np.zeros((height,width,3))
-        for cc,j in enumerate(np.arange(15)):
-            A[:,:,int(cc/5)]+=scmap[:,:,j]
-
-        #A[:,:,2]=partaffinityfield_map[:,:,j]*0
-        print(np.amax(A),np.amin(A))
-        plt.figure()
-        plt.imshow(A)
-        plt.savefig(str(data_item.im_path.split('/')[-1]).split('png')[0]+"maps.png")
-
-        plt.figure()
-        plt.imshow(scmap[:,:,-2])
-        plt.savefig(str(data_item.im_path.split('/')[-1]).split('png')[0]+"id1.png")
-
-        plt.figure()
-        plt.imshow(scmap[:,:,-1])
-        plt.savefig(str(data_item.im_path.split('/')[-1]).split('png')[0]+"id2.png")
-
-
-        pafid=1 #
-        bp1,bp2=self.cfg.partaffinityfield_graph[pafid] #- for pups!
-
-        A=np.zeros((height,width,3))
-
-        print("plotting",bp1,bp2)
-        for cc,j in enumerate([bp1,bp2]):
-            A[:,:,cc]=scmap[:,:,j]
-        #A[:,:,2]=partaffinityfield_map[:,:,j]*0
-
-        plt.figure()
-        plt.imshow(A)
-        plt.savefig("SomeSCMAPS"+str(data_item.im_path.split('/')[-1]))
-
-        for j in range(2): #plotting x and y
-            plt.figure()
-            plt.imshow(partaffinityfield_map[:,:,pafid*2+j]*255)
-        plt.colorbar()
-        #plt.savefig("SomePafs"+str(data_item.im_path.split('/')[-1]))
-        plt.savefig(str(data_item.im_path.split('/')[-1]).split('png')[0]+"pafs.png")
-        """
         weights = self.compute_scmap_weights(scmap.shape, joint_id, data_item)
         return (
             scmap,
@@ -553,23 +506,23 @@ class MAPoseDataset:
 
     def gaussian_scmap(self, joint_id, coords, data_item, size, scale):
         # WIP!
-        stride = self.cfg.stride
-        dist_thresh = float(self.cfg.pos_dist_thresh * scale)
+        stride = self.cfg["stride"]
+        dist_thresh = float(self.cfg["pos_dist_thresh"] * scale)
         num_idchannel = self.cfg.get("num_idchannel", 0)
 
-        num_joints = self.cfg.num_joints
+        num_joints = self.cfg["num_joints"]
         half_stride = stride / 2
         scmap = np.zeros(cat([size, arr([num_joints])]))
         locref_size = cat([size, arr([num_joints * 2])])
         locref_mask = np.zeros(locref_size)
         locref_map = np.zeros(locref_size)
 
-        locref_scale = 1.0 / self.cfg.locref_stdev
+        locref_scale = 1.0 / self.cfg["locref_stdev"]
         dist_thresh_sq = dist_thresh ** 2
 
-        partaffinityfield_shape = cat([size, arr([self.cfg.num_limbs * 2])])
+        partaffinityfield_shape = cat([size, arr([self.cfg["num_limbs"] * 2])])
         partaffinityfield_map = np.zeros(partaffinityfield_shape)
-        if self.cfg.weigh_only_present_joints:
+        if self.cfg["weigh_only_present_joints"]:
             partaffinityfield_mask = np.zeros(partaffinityfield_shape)
             locref_mask = np.zeros(locref_size)
         else:
@@ -614,8 +567,8 @@ class MAPoseDataset:
             joint_ids = joint_id[person_id].copy()
             if len(joint_ids) > 1:  # otherwise there cannot be a joint!
                 # CONSIDER SMARTER SEARCHES here... (i.e. calculate the bpts beforehand?)
-                for l in range(self.cfg.num_limbs):
-                    bp1, bp2 = self.cfg.partaffinityfield_graph[l]
+                for l in range(self.cfg["num_limbs"]):
+                    bp1, bp2 = self.cfg["partaffinityfield_graph"][l]
                     I1 = np.where(np.array(joint_ids) == bp1)[0]
                     I2 = np.where(np.array(joint_ids) == bp2)[0]
                     if (len(I1) > 0) * (len(I2) > 0):
@@ -654,7 +607,7 @@ class MAPoseDataset:
                                     - d2mid
                                 )
                                 * 1.0
-                                / self.cfg.pafwidth
+                                / self.cfg["pafwidth"]
                                 * scale
                             )
                             mask1 = (distance_along >= d1lowerboundary) & (
@@ -664,7 +617,7 @@ class MAPoseDataset:
                             # mask3 = ((x >= 0) & (x <= width-1))
                             # mask4 = ((y >= 0) & (y <= height-1))
                             mask = mask1 & mask2  # &mask3 &mask4
-                            if self.cfg.weigh_only_present_joints:
+                            if self.cfg["weigh_only_present_joints"]:
                                 partaffinityfield_mask[mask, l * 2 + 0] = 1.0
                                 partaffinityfield_mask[mask, l * 2 + 1] = 1.0
 

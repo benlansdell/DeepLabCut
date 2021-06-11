@@ -1,5 +1,5 @@
 """
-DeepLabCut2.0 Toolbox (deeplabcut.org)
+DeepLabCut 2.2 Toolbox (deeplabcut.org)
 © A. & M. Mathis Labs
 https://github.com/AlexEMG/DeepLabCut
 Please see AUTHORS for contributors.
@@ -23,6 +23,7 @@ from tqdm import tqdm
 
 from deeplabcut.pose_estimation_tensorflow.evaluate import make_results_file
 from deeplabcut.pose_estimation_tensorflow.config import load_config
+from deeplabcut.pose_estimation_tensorflow.lib import crossvalutils
 from deeplabcut.utils import visualization
 
 
@@ -67,12 +68,12 @@ def _find_closest_neighbors(xy_true, xy_pred, k=5):
 
 
 def _calc_prediction_error(data):
-    _ = data.pop('metadata', None)
+    _ = data.pop("metadata", None)
     dists = []
     for n, dict_ in enumerate(tqdm(data.values())):
-        gt = np.concatenate(dict_['groundtruth'][1])
-        xy = np.concatenate(dict_['prediction']['coordinates'][0])
-        p = np.concatenate(dict_['prediction']['confidence'])
+        gt = np.concatenate(dict_["groundtruth"][1])
+        xy = np.concatenate(dict_["prediction"]["coordinates"][0])
+        p = np.concatenate(dict_["prediction"]["confidence"])
         neighbors = _find_closest_neighbors(gt, xy)
         found = neighbors != -1
         gt2 = gt[found]
@@ -82,7 +83,7 @@ def _calc_prediction_error(data):
 
 
 def _calc_train_test_error(data, metadata, pcutoff=0.3):
-    train_inds = set(metadata['data']['trainIndices'])
+    train_inds = set(metadata["data"]["trainIndices"])
     dists = _calc_prediction_error(data)
     dists_train, dists_test = [], []
     for n, dist in enumerate(dists):
@@ -144,8 +145,7 @@ def evaluate_multianimal_full(
             cfg["project_path"],
             str(trainingsetfolder),
             "CollectedData_" + cfg["scorer"] + ".h5",
-        ),
-        "df_with_missing",
+        )
     )
     # Handle data previously annotated on a different platform
     sep = "/" if "/" in Data.index[0] else "\\"
@@ -285,7 +285,8 @@ def evaluate_multianimal_full(
                         Snapshots[snapindex],
                     )
 
-                    if os.path.isfile(resultsfilename.split(".h5")[0] + "_full.pickle"):
+                    data_path = resultsfilename.split(".h5")[0] + "_full.pickle"
+                    if os.path.isfile(data_path):
                         print("Model already evaluated.", resultsfilename)
                     else:
                         if plotting:
@@ -297,6 +298,7 @@ def evaluate_multianimal_full(
                                 + Snapshots[snapindex],
                             )
                             auxiliaryfunctions.attempttomakefolder(foldername)
+                            fig, ax = visualization.create_minimal_figure()
 
                         # print(dlc_cfg)
                         # Specifying state of model (snapshot / training state)
@@ -310,21 +312,24 @@ def evaluate_multianimal_full(
                         for imageindex, imagename in tqdm(enumerate(Data.index)):
                             image_path = os.path.join(cfg["project_path"], imagename)
                             image = io.imread(image_path)
-                            frame = img_as_ubyte(skimage.color.gray2rgb(image))
+                            if image.ndim == 2 or image.shape[-1] == 1:
+                                image = skimage.color.gray2rgb(image)
+                            frame = img_as_ubyte(image)
 
                             GT = Data.iloc[imageindex]
-                            df = GT.unstack("coords").reindex(joints, level='bodyparts')
+                            df = GT.unstack("coords").reindex(joints, level="bodyparts")
 
                             # Evaluate PAF edge lengths to calibrate `distnorm`
-                            temp = GT.unstack("bodyparts")[joints]
-                            xy = temp.values.reshape((-1, 2, temp.shape[1])).swapaxes(
-                                1, 2
-                            )
-                            edges = xy[:, dlc_cfg["partaffinityfield_graph"]]
-                            lengths = np.sum(
-                                (edges[:, :, 0] - edges[:, :, 1]) ** 2, axis=2
-                            )
-                            distnorm[imageindex] = np.nanmax(lengths)
+                            temp_xy = GT.unstack("bodyparts")[joints]
+                            xy = temp_xy.values.reshape(
+                                (-1, 2, temp_xy.shape[1])
+                            ).swapaxes(1, 2)
+                            if dlc_cfg["partaffinityfield_predict"]:
+                                edges = xy[:, dlc_cfg["partaffinityfield_graph"]]
+                                lengths = np.sum(
+                                    (edges[:, :, 0] - edges[:, :, 1]) ** 2, axis=2
+                                )
+                                distnorm[imageindex] = np.nanmax(lengths)
 
                             # FIXME Is having an empty array vs nan really that necessary?!
                             groundtruthidentity = list(
@@ -351,8 +356,8 @@ def evaluate_multianimal_full(
                                 inputs,
                                 outputs,
                                 outall=False,
-                                nms_radius=dlc_cfg.nmsradius,
-                                det_min_score=dlc_cfg.minconfidence,
+                                nms_radius=dlc_cfg["nmsradius"],
+                                det_min_score=dlc_cfg["minconfidence"],
                                 c_engine=c_engine,
                             )
                             PredicteData[imagename]["prediction"] = pred
@@ -382,23 +387,32 @@ def evaluate_multianimal_full(
                                     conf[sl] = probs_pred[n_joint][cols].squeeze()
 
                             if plotting:
-                                fig = visualization.make_multianimal_labeled_image(
+                                gt = temp_xy.values.reshape(
+                                    (-1, 2, temp_xy.shape[1])
+                                ).T.swapaxes(1, 2)
+                                h, w, _ = np.shape(frame)
+                                fig.set_size_inches(w / 100, h / 100)
+                                ax.set_xlim(0, w)
+                                ax.set_ylim(0, h)
+                                ax.invert_yaxis()
+                                ax = visualization.make_multianimal_labeled_image(
                                     frame,
-                                    groundtruthcoordinates,
+                                    gt,
                                     coords_pred,
                                     probs_pred,
                                     colors,
                                     cfg["dotsize"],
                                     cfg["alphavalue"],
                                     cfg["pcutoff"],
+                                    ax=ax,
                                 )
-
                                 visualization.save_labeled_frame(
                                     fig,
                                     image_path,
                                     foldername,
                                     imageindex in trainIndices,
                                 )
+                                visualization.erase_artists(ax)
 
                         sess.close()  # closes the current tf session
 
@@ -409,7 +423,7 @@ def evaluate_multianimal_full(
                             [df_dist, df_conf],
                             keys=["rmse", "conf"],
                             names=["metrics"],
-                            axis=1
+                            axis=1,
                         )
                         df_joint = df_joint.reorder_levels(
                             list(np.roll(df_joint.columns.names, -1)), axis=1
@@ -418,14 +432,19 @@ def evaluate_multianimal_full(
                             axis=1,
                             level=["individuals", "bodyparts"],
                             ascending=[True, True],
-                            inplace=True
+                            inplace=True,
                         )
-                        write_path = os.path.join(evaluationfolder, f"dist_{trainingsiterations}.csv")
+                        write_path = os.path.join(
+                            evaluationfolder, f"dist_{trainingsiterations}.csv"
+                        )
                         df_joint.to_csv(write_path)
 
                         # Calculate overall prediction error
                         error = df_joint.xs("rmse", level="metrics", axis=1)
-                        mask = df_joint.xs("conf", level="metrics", axis=1) >= cfg["pcutoff"]
+                        mask = (
+                            df_joint.xs("conf", level="metrics", axis=1)
+                            >= cfg["pcutoff"]
+                        )
                         error_masked = error[mask]
                         error_train = np.nanmean(error.iloc[trainIndices])
                         error_train_cut = np.nanmean(error_masked.iloc[trainIndices])
@@ -446,29 +465,51 @@ def evaluate_multianimal_full(
                         # For OKS/PCK, compute the standard deviation error across all frames
                         sd = df_dist.groupby(level="bodyparts", axis=1).mean().std(axis=0)
                         sd["distnorm"] = np.sqrt(np.nanmax(distnorm))
-                        sd.to_csv(write_path.replace("dist.csv", "sd.csv"))
+                        sd.to_csv(write_path.replace("dist_", "sd_"))
 
                         if show_errors:
-                            string = "Results for {} training iterations: {}, shuffle {}:\n" \
-                                     "Train error: {} pixels. Test error: {} pixels.\n" \
-                                     "With pcutoff of {}:\n" \
-                                     "Train error: {} pixels. Test error: {} pixels."
+                            string = (
+                                "Results for {} training iterations: {}, shuffle {}:\n"
+                                "Train error: {} pixels. Test error: {} pixels.\n"
+                                "With pcutoff of {}:\n"
+                                "Train error: {} pixels. Test error: {} pixels."
+                            )
                             print(string.format(*results))
 
                             print("##########################################")
-                            print("Average Euclidean distance to GT per individual (in pixels)")
-                            print(error_masked.groupby(level='individuals', axis=1).mean().mean().to_string())
-                            print("Average Euclidean distance to GT per bodypart (in pixels)")
-                            print(error_masked.groupby(level='bodyparts', axis=1).mean().mean().to_string())
+                            print(
+                                "Average Euclidean distance to GT per individual (in pixels)"
+                            )
+                            print(
+                                error_masked.groupby("individuals", axis=1)
+                                .mean()
+                                .mean()
+                                .to_string()
+                            )
+                            print(
+                                "Average Euclidean distance to GT per bodypart (in pixels)"
+                            )
+                            print(
+                                error_masked.groupby("bodyparts", axis=1)
+                                .mean()
+                                .mean()
+                                .to_string()
+                            )
 
                         PredicteData["metadata"] = {
-                            "nms radius": dlc_cfg.nmsradius,
-                            "minimal confidence": dlc_cfg.minconfidence,
-                            "PAFgraph": dlc_cfg.partaffinityfield_graph,
-                            "all_joints": [[i] for i in range(len(dlc_cfg.all_joints))],
+                            "nms radius": dlc_cfg["nmsradius"],
+                            "minimal confidence": dlc_cfg["minconfidence"],
+                            "PAFgraph": dlc_cfg["partaffinityfield_graph"],
+                            "PAFinds": dlc_cfg.get(
+                                "paf_best",
+                                np.arange(len(dlc_cfg["partaffinityfield_graph"])),
+                            ),
+                            "all_joints": [
+                                [i] for i in range(len(dlc_cfg["all_joints"]))
+                            ],
                             "all_joints_names": [
-                                dlc_cfg.all_joints_names[i]
-                                for i in range(len(dlc_cfg.all_joints))
+                                dlc_cfg["all_joints_names"][i]
+                                for i in range(len(dlc_cfg["all_joints"]))
                             ],
                             "stride": dlc_cfg.get("stride", 8),
                         }
@@ -485,11 +526,28 @@ def evaluate_multianimal_full(
                             "trainFraction": trainFraction,
                         }
                         metadata = {"data": dictionary}
-                        auxfun_multianimal.SaveFullMultiAnimalData(
+                        _ = auxfun_multianimal.SaveFullMultiAnimalData(
                             PredicteData, metadata, resultsfilename
                         )
 
                         tf.reset_default_graph()
+
+                    # Skip data-driven skeleton selection unless
+                    # the model was trained on the full graph.
+                    max_n_edges = dlc_cfg["num_joints"] * (dlc_cfg["num_joints"] - 1) // 2
+                    if len(dlc_cfg["partaffinityfield_graph"]) == max_n_edges:
+                        uncropped_data_path = data_path.replace(
+                            ".pickle", "_uncropped.pickle"
+                        )
+                        if not os.path.isfile(uncropped_data_path):
+                            print("Selecting best skeleton...")
+                            crossvalutils._rebuild_uncropped_in(evaluationfolder)
+                            crossvalutils.cross_validate_paf_graphs(
+                                config,
+                                str(path_test_config).replace("pose_", "inference_"),
+                                uncropped_data_path,
+                                uncropped_data_path.replace("_full_", "_meta_"),
+                            )
 
                 if len(final_result) > 0:  # Only append if results were calculated
                     make_results_file(final_result, evaluationfolder, DLCscorer)

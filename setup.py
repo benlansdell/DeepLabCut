@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DeepLabCut2.0 Toolbox (deeplabcut.org)
+DeepLabCut2.0-2.2 Toolbox (deeplabcut.org)
 © A. & M. Mathis Labs
 https://github.com/DeepLabCut/DeepLabCut
 
@@ -17,7 +17,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="deeplabcut",
-    version="2.1.9",
+    version="2.2rc2",
     author="A. & M. Mathis Labs",
     author_email="alexander@deeplabcut.org",
     description="Markerless pose-estimation of user-defined features with deep learning",
@@ -25,40 +25,40 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/DeepLabCut/DeepLabCut",
     install_requires=[
-        "bayesian-optimization",
+        "python-dateutil",
+        "ipython",
+        "ipython-genutils",
+        "wheel",
         "certifi",
         "chardet",
         "click",
         "cython",
-        "easydict",
         "filterpy",
         "h5py",
+        "ruamel.yaml>=0.15.0",
         "intel-openmp",
         "imgaug",
-        "ipython",
-        "ipython-genutils",
         "numba==0.51.1",
         "matplotlib==3.1.3",
-        "moviepy<=1.0.1",
-        "numpy==1.16.4",
+        "networkx",
+        "numpy~=1.17.3",
         "opencv-python-headless",
         "pandas>=1.0.1",
         "patsy",
-        "python-dateutil",
         "pyyaml",
-        "requests",
-        "ruamel.yaml>=0.15.0",
         "setuptools",
-        "scikit-image",
+        "scikit-image>=0.17",
         "scikit-learn",
         "scipy>=1.4",
         "six",
         "statsmodels>=0.11",
         "tables",
-        "tensorpack==0.9.8",
+        "tensorpack",
         "tqdm",
-        "wheel",
+        "moviepy<=1.0.1",
+        "Pillow>=7.1",
     ],
+    extras_require={"gui": ["wxpython<4.1"]},
     scripts=["deeplabcut/pose_estimation_tensorflow/models/pretrained/download.sh"],
     packages=setuptools.find_packages(),
     data_files=[
